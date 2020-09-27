@@ -8,8 +8,8 @@
 #define STAIRS_COLOR YELLOW
 #define GAME_TIME_MAX 360000 //6 minutes
 //#define GAME_TIME_MAX 10000 //10 seconds
-//              0     1      10   11    100       101       110       111      1000      1001      1010      1011      1100      1101      1110
-enum protoc {NONE, MOVE, ASCEND, WIN, RESET, UNUSED_1, UNUSED_2, UNUSED_3, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
+//              0     1      10   11    100   101       110       111      1000      1001      1010      1011      1100      1101      1110
+enum protoc {NONE, MOVE, ASCEND, WIN, RESET, LEFT, UNUSED_2, UNUSED_3, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
 Timer timer;
 unsigned long startMillis;
 bool isStairs = false;
@@ -31,11 +31,10 @@ STATE_DEC(gameOverS);
 STATE_DEC(broadcastS);
 STATE_DEC(broadcastIgnoreS);
 
-void handleBroadcasts(bool handleResetRequest) {  
+void handleBroadcasts(bool handleResetRequest, bool ignoreAscend) {  
   if (handleResetRequest && buttonLongPressed()) {
     broadcastMessage = RESET;
-    changeState(broadcastS::state);
-    return;
+    changeState(broadcastS::state); return;
   }
   broadcastMessage = NONE;
   FOREACH_FACE(f) {
@@ -43,6 +42,7 @@ void handleBroadcasts(bool handleResetRequest) {
       protoc lastValue = getLastValueReceivedOnFace(f);
       switch(lastValue) {
         case ASCEND:
+          if (ignoreAscend) break;
         case WIN:
         case RESET:
           broadcastMessage = lastValue;
@@ -50,20 +50,15 @@ void handleBroadcasts(bool handleResetRequest) {
       }
     }
   }
-  if (broadcastMessage != NONE) changeState(broadcastS::state);
+  if (broadcastMessage != NONE) { changeState(broadcastS::state); return; }
   //handle times up
-  if (millis() - startMillis > GAME_TIME_MAX) {
-    changeState(gameOverS::state);
-  }
+  if (millis() - startMillis > GAME_TIME_MAX) { changeState(gameOverS::state); return; }
 }
 
 STATE_DEF(avatarS, 
   { //entry
     setValueSentOnAllFaces(level);
     setColor(OFF);
-    for(uint8_t x = 0; x < level - AVATAR_0 ; ++ x) {
-      setColorOnFace(AVATAR_COLOR, x);
-    }
   },
   { //loop
     FOREACH_FACE(f) {
@@ -71,18 +66,31 @@ STATE_DEF(avatarS,
         switch(getLastValueReceivedOnFace(f)) {
           case MOVE: //avatar is being pulled to neighbor
             heading = f;
-            changeState(avatarLeavingS::state);
+            changeState(avatarLeavingS::state); return;
             break;
         }
       }
     }
-    handleBroadcasts(true);
+  
+    //animate time remaining    
+    byte blinkFace = (millis() - startMillis) / (GAME_TIME_MAX / 6);
+    Color  on = AVATAR_COLOR;
+    Color off = dim(AVATAR_COLOR,  32);
+    Color blinq = millis() % 1000 / 500 == 0 ? off : on;
+    FOREACH_FACE(f) {
+           if (f < blinkFace) setColorOnFace(  off, f);
+      else if (f > blinkFace) setColorOnFace(   on, f);
+      else                    setColorOnFace(blinq, f);
+    }
+
+    handleBroadcasts(true, true);
   }
 )
 
 STATE_DEF(avatarLeavingS, 
   { //entry
     setValueSentOnAllFaces(NONE);
+    setValueSentOnFace(LEFT, heading);
     setColor(PATH_COLOR);
     setColorOnFace(AVATAR_COLOR, heading);
     setColorOnFace(AVATAR_COLOR, (heading + 1) % 6);
@@ -91,10 +99,10 @@ STATE_DEF(avatarLeavingS,
   { //loop
     if (!isValueReceivedOnFaceExpired(heading)) {
       // if neighbor is sending avatar then the avatar has succesfully moved
-      if ((getLastValueReceivedOnFace(heading) & AVATAR_0) == AVATAR_0) changeState(pathS::state);
+      if ((getLastValueReceivedOnFace(heading) & AVATAR_0) == AVATAR_0) { changeState(pathS::state); return; }
       //TODO this might be tricky when the avatar moved to stairs...
     }
-    handleBroadcasts(true);
+    handleBroadcasts(true, false);
   }
 )
 
@@ -107,15 +115,22 @@ STATE_DEF(avatarEnteringS,
     setColorOnFace(AVATAR_COLOR, (heading + 5) % 6);
   },
   { //loop
-    if (getLastValueReceivedOnFace(heading) == NONE) { //after avatar is confirmed to be here then transition to actual Avatar state
-      if ( isStairs) {
-        level = level - 1;
-        changeState(avatarAscendedS::state);
-      } else {
-        changeState(avatarS::state);
+    if (!isValueReceivedOnFaceExpired(heading)) {
+      switch (getLastValueReceivedOnFace(heading)) {
+        case LEFT: //former avatar blink is acknowledging move request
+          if (isStairs) {
+            level = level - 1;
+            changeState(avatarAscendedS::state); return;
+          } else {
+            changeState(avatarS::state); return;
+          }
+        case NONE: //former avatar tile became path, avatar must have moved to some other blink
+          changeState(pathS::state); return; //revert back to path
+        default:
+          break;
       }
     }
-    handleBroadcasts(true);
+    handleBroadcasts(true, true);
   }
 )
 
@@ -135,7 +150,7 @@ STATE_DEF(avatarAscendedS,
   { //loop
     if (timer.isExpired()) {
       isStairs = false;
-      changeState(avatarS::state);
+      changeState(avatarS::state); return;
     }
   }
 )
@@ -152,26 +167,16 @@ STATE_DEF(fogS,
         if((getLastValueReceivedOnFace(f) & AVATAR_0) == AVATAR_0) {//next to avatar become path or wall or stairs
           byte chance = random(20);
           isStairs = chance == 0;
-          if (chance < 10) changeState(pathS::state);
-          else changeState(wallS::state);
+          if (chance < 10) { changeState(pathS::state); return; }
+          else { changeState(wallS::state); return; }
         }
       }
     }
-  
-    //animate time remaining    
-    byte blinkFace = (millis() - startMillis) / (GAME_TIME_MAX / 6);
-    Color  on = FOG_COLOR;
-    Color off = dim(FOG_COLOR,  32);
-    Color blinq = millis() % 1000 / 500 == 0 ? off : on;
-    FOREACH_FACE(f) {
-           if (f < blinkFace) setColorOnFace(  off, f);
-      else if (f > blinkFace) setColorOnFace(   on, f);
-      else                    setColorOnFace(blinq, f);
-    }
 
-    if (buttonLongPressed()) changeState(avatarS::state);
+    buttonSingleClicked(); //do nothing just consume errant click
+    if (buttonLongPressed()) { changeState(avatarS::state); return; }
 
-    handleBroadcasts(false);
+    handleBroadcasts(false, false);
   }
 )
 
@@ -195,7 +200,7 @@ STATE_DEF(pathS,
           }
         }
       }
-      if (!avatarIsNeighbor) changeState(fogS::state); //if avatar is not on any neighbor revert to fog
+      if (!avatarIsNeighbor) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
     }
       
     if (buttonSingleClicked()) {
@@ -205,13 +210,13 @@ STATE_DEF(pathS,
           if ((lastValue & AVATAR_0) == AVATAR_0) { // is avatar?
               heading = f;
               level = lastValue;
-              changeState(avatarEnteringS::state);
+              changeState(avatarEnteringS::state); return;
           }
         }
       }
     }
     
-    handleBroadcasts(true);
+    handleBroadcasts(true, false);
   }
 )
 
@@ -235,10 +240,10 @@ STATE_DEF(wallS,
           }
         }
       }
-      if (!avatarIsNeighbor) changeState(fogS::state); //if avatar is not on any neighbor revert to fog
+      if (!avatarIsNeighbor) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
     }
     
-    handleBroadcasts(true);
+    handleBroadcasts(true, false);
   }
 )
 
@@ -266,7 +271,7 @@ STATE_DEF(gameOverS,
         setColorOnFace(dim(STAIRS_COLOR, (f-offset)%6 * (255 / 6)), f);
       }
     }
-    handleBroadcasts(true);
+    handleBroadcasts(true, true);
   }
 )
 
@@ -291,9 +296,7 @@ STATE_DEF(broadcastS,
     }
   },
   { //loop
-    if(timer.isExpired()) {
-      changeState(broadcastIgnoreS::state);
-    }
+    if(timer.isExpired()) { changeState(broadcastIgnoreS::state); return; }
   }
 )
 
@@ -305,7 +308,7 @@ STATE_DEF(broadcastIgnoreS,
   },
   { //loop
     if(timer.isExpired()) { //stop ignoring
-      changeState(postBroadcastState);
+      changeState(postBroadcastState); return;
     }
   }
 )
@@ -321,12 +324,12 @@ STATE_DEF(initS,
     setColor(GREEN);
   },
   { //loop
-    changeState(fogS::state);
+    changeState(fogS::state); return;
   }
 )
 
 void setup() {
-  changeState(initS::state);
+  changeState(initS::state); return;
 }
 
 void loop() {
