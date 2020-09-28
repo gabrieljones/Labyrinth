@@ -1,9 +1,9 @@
 #include "State.h"
 
-#define PATH_COLOR dim(BLUE, 64)
+#define PATH_COLOR BLUE
 #define AVATAR_COLOR GREEN
 #define WALL_COLOR RED
-#define FOG_COLOR WHITE
+#define FOG_COLOR dim(WHITE, 32)
 #define RESET_COLOR MAGENTA
 #define STAIRS_COLOR YELLOW
 #define REVERT_TIME_PATH 2000
@@ -11,8 +11,8 @@
 #define GAME_TIME_MAX 180000 //3 minutes
 //#define GAME_TIME_MAX 360000 //6 minutes
 //#define GAME_TIME_MAX 10000 //10 seconds
-//              0     1      10   11    100   101       110       111      1000      1001      1010      1011      1100      1101      1110
-enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, UNUSED_2, UNUSED_3, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
+//              0     1      10   11    100   101       110             111      1000      1001      1010      1011      1100      1101      1110
+enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, UNUSED_2, LEVEL_MASK, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
 Timer timer;
 unsigned long startMillis;
 bool isStairs = false;
@@ -62,6 +62,12 @@ bool handleGameTimer() {
   else { return false; }
 }
 
+Color dimToLevel(Color color) {
+  byte level_inv = AVATAR_6 - level;
+  byte bright = map(level_inv, 0, AVATAR_5 & LEVEL_MASK, 32, MAX_BRIGHTNESS);
+  return dim(color, bright);
+}
+
 STATE_DEF(avatarS, 
   { //entry
     setValueSentOnAllFaces(level);
@@ -99,7 +105,7 @@ STATE_DEF(avatarLeavingS,
   { //entry
     setValueSentOnAllFaces(NONE);
     setValueSentOnFace(DEPARTED, heading);
-    setColor(PATH_COLOR);
+    setColor(dimToLevel(PATH_COLOR));
     setColorOnFace(AVATAR_COLOR, heading);
     setColorOnFace(AVATAR_COLOR, (heading + 1) % 6);
     setColorOnFace(AVATAR_COLOR, (heading + 5) % 6);
@@ -119,7 +125,7 @@ STATE_DEF(avatarLeavingS,
 STATE_DEF(avatarEnteringS, 
   { //entry
     setValueSentOnFace(MOVE, heading); //request the avatar move here
-    setColor(PATH_COLOR);
+    setColor(dimToLevel(PATH_COLOR));
     setColorOnFace(AVATAR_COLOR, heading);
     setColorOnFace(AVATAR_COLOR, (heading + 1) % 6);
     setColorOnFace(AVATAR_COLOR, (heading + 5) % 6);
@@ -204,12 +210,7 @@ STATE_DEF(fogS,
 STATE_DEF(pathS, 
   { //entry
     setValueSentOnAllFaces(NONE);
-    if (isStairs) FOREACH_FACE(f) { setColorOnFace(dim(STAIRS_COLOR, f * (255 / 6)), f); }
-    else {
-      setColorOnFace(PATH_COLOR, heading);
-      setColorOnFace(PATH_COLOR, (heading + 1) % 6);
-      setColorOnFace(PATH_COLOR, (heading + 5) % 6);
-    }
+    setColor(FOG_COLOR);
     timer.set(REVERT_TIME_PATH); //revert to fog after a longer bit
   },
   { //loop
@@ -222,6 +223,7 @@ STATE_DEF(pathS,
         if ((lastValue & AVATAR_0) == AVATAR_0) { // is avatar?
           heading = f;
           level = lastValue;
+          timer.set(REVERT_TIME_PATH);
           break;
         }
       }
@@ -253,6 +255,13 @@ STATE_DEF(pathS,
 //        setColor(fadeColor);
 //      }
 //    }
+
+    if (isStairs) FOREACH_FACE(f) { setColorOnFace(dim(STAIRS_COLOR, f * (255 / 6)), f); }
+    else {
+      setColorOnFace(dimToLevel(PATH_COLOR), heading);
+//      setColorOnFace(dimToLevel(PATH_COLOR), (heading + 1) % 6);
+//      setColorOnFace(dimToLevel(PATH_COLOR), (heading + 5) % 6);
+    }
     
     if (handleGameTimer()) return;
     handleBroadcasts(true, false);
@@ -262,26 +271,26 @@ STATE_DEF(pathS,
 STATE_DEF(wallS, 
   { //entry
     setValueSentOnAllFaces(NONE);
-    setColorOnFace(WALL_COLOR, heading);
-    setColorOnFace(WALL_COLOR, (heading + 1) % 6);
-    setColorOnFace(WALL_COLOR, (heading + 5) % 6);
     timer.set(REVERT_TIME_WALL); //revert to fog after a bit
   },
   { //loop
     if(isAlone()) { changeState(fogS::state); return; }
 
-    if(timer.isExpired()) {
-      bool avatarIsNeighbor = false;
-      FOREACH_FACE(f) { //check if avatar is on neighbor
-        if (!isValueReceivedOnFaceExpired(f)) {
-          protoc lastValue = getLastValueReceivedOnFace(f);
-          if ((lastValue & AVATAR_0) == AVATAR_0) { // is avatar?
-            avatarIsNeighbor = true;
-            //do nothing, stay wall
-          }
+    heading = 255;
+    FOREACH_FACE(f) { //check if avatar is on neighbor
+      if (!isValueReceivedOnFaceExpired(f)) {
+        protoc lastValue = getLastValueReceivedOnFace(f);
+        if ((lastValue & AVATAR_0) == AVATAR_0) { // is avatar?
+          heading = f;
+          level = lastValue;
+          timer.set(REVERT_TIME_WALL);
+          break;
         }
       }
-      if (!avatarIsNeighbor) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
+    }
+    
+    if(timer.isExpired()) {
+      if (heading > FACE_COUNT) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
     }
 
     //fade to fog
@@ -298,6 +307,9 @@ STATE_DEF(wallS,
 //    } else {
 ////      setColor(fadeColor);
 //    }
+    setColorOnFace(dimToLevel(WALL_COLOR), heading);
+//    setColorOnFace(dimToLevel(WALL_COLOR), (heading + 1) % 6);
+//    setColorOnFace(dimToLevel(WALL_COLOR), (heading + 5) % 6);
     
     if (handleGameTimer()) return;
     handleBroadcasts(true, false);
@@ -362,7 +374,7 @@ STATE_DEF(broadcastIgnoreS,
   { //entry
     timer.set(500);
     setValueSentOnAllFaces(NONE); //stop broadcasting
-    setColor(BLUE);
+    setColor(dimToLevel(BLUE));
   },
   { //loop
     if(timer.isExpired()) { //stop ignoring
@@ -379,7 +391,7 @@ STATE_DEF(initS,
     won = false;
     level = AVATAR_6;
     broadcastMessage = NONE;
-    setColor(GREEN);
+    setColor(dimToLevel(GREEN));
   },
   { //loop
     changeState(fogS::state); return;
