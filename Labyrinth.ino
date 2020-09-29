@@ -6,16 +6,18 @@
 #define FOG_COLOR dim(WHITE, 32)
 #define RESET_COLOR MAGENTA
 #define STAIRS_COLOR YELLOW
-#define REVERT_TIME_PATH 2000
-#define REVERT_TIME_WALL  2000
+#define REVERT_TIME_PATH 10000
+#define REVERT_TIME_WALL  5000
+#define STAIR_INTERVAL    8000
 #define GAME_TIME_MAX 180000 //3 minutes
 //#define GAME_TIME_MAX 360000 //6 minutes
 //#define GAME_TIME_MAX 10000 //10 seconds
 //              0     1      10   11    100   101       110             111      1000      1001      1010      1011      1100      1101      1110
 enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, UNUSED_2, LEVEL_MASK, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
 Timer timer;
+Timer stairsTimer;
 unsigned long startMillis;
-bool isStairs = false;
+byte stairBits = 0b00000000;
 bool won = false;
 byte heading = 255;
 protoc broadcastMessage = NONE;
@@ -60,6 +62,16 @@ void handleBroadcasts(bool handleResetRequest, bool ignoreAscend) {
 bool handleGameTimer() {
   if (millis() - startMillis > GAME_TIME_MAX) { changeState(gameOverS::state); return true; }
   else { return false; }
+}
+
+void moveStairs() {
+  if (stairsTimer.isExpired()) {
+    stairBits = 0b00000000;
+    if (random(6) == 0) {
+      bitSet(stairBits, random(6));
+    }
+    stairsTimer.set(STAIR_INTERVAL);
+  }
 }
 
 Color dimToLevel(Color color) {
@@ -138,8 +150,7 @@ STATE_DEF(avatarEnteringS,
     if (!isValueReceivedOnFaceExpired(heading)) {
       switch (getLastValueReceivedOnFace(heading)) {
         case DEPARTED: //former avatar blink is acknowledging move request
-          if (isStairs) {
-            level = level - 1;
+          if (bitRead(stairBits, heading)) {
             changeState(avatarAscendedS::state); return;
           } else {
             changeState(avatarS::state); return;
@@ -171,7 +182,7 @@ STATE_DEF(avatarAscendedS,
   },
   { //loop
     if (timer.isExpired()) {
-      isStairs = false;
+      stairBits = 0b00000000;
       changeState(avatarS::state); return;
     }
   }
@@ -198,13 +209,14 @@ STATE_DEF(fogS,
 
     if (heading < FACE_COUNT) { //next to avatar become path or wall or stairs
       byte chance = random(20);
-      isStairs = chance == 0;
       if (chance < 10) { changeState(pathS::state); return; }
       else { changeState(wallS::state); return; }
     }
 
     buttonSingleClicked(); //do nothing just consume errant click
     if (buttonLongPressed()) { changeState(avatarS::state); return; }
+
+    moveStairs();
 
     if (handleGameTimer()) return;
     handleBroadcasts(false, false);
@@ -215,6 +227,7 @@ STATE_DEF(pathS,
   { //entry
     setValueSentOnAllFaces(NONE);
 //    setColor(FOG_COLOR);
+    stairBits = 0b00000000;
     timer.set(REVERT_TIME_PATH); //revert to fog after a longer bit
   },
   { //loop
@@ -260,13 +273,10 @@ STATE_DEF(pathS,
 //      }
 //    }
 
-    if (isStairs) FOREACH_FACE(f) { setColorOnFace(dim(STAIRS_COLOR, f * (255 / 6)), f); }
-    else {
-      if (heading < FACE_COUNT) {
-        setColorOnFace(dimToLevel(PATH_COLOR), heading);
-        setColorOnFace(dimToLevel(PATH_COLOR), (heading + 1) % 6);
-        setColorOnFace(dimToLevel(PATH_COLOR), (heading + 5) % 6);
-      }
+    if (heading < FACE_COUNT) {
+      setColorOnFace(dimToLevel(PATH_COLOR), heading);
+      setColorOnFace(dimToLevel(PATH_COLOR), (heading + 1) % 6);
+      setColorOnFace(dimToLevel(PATH_COLOR), (heading + 5) % 6);
     }
     
     if (handleGameTimer()) return;
@@ -299,6 +309,12 @@ STATE_DEF(wallS,
       if (heading > FACE_COUNT) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
     }
 
+    if (buttonSingleClicked()) {
+      if (heading < FACE_COUNT && bitRead(stairBits, heading)) {//if avatar neighbors stair face
+        changeState(avatarEnteringS::state); return;
+      }
+    }
+
     //fade to fog
 //    byte elapsed = REVERT_TIME_PATH - timer.getRemaining();
 //    byte r = map(elapsed, 0, REVERT_TIME_PATH, WALL_COLOR.r, MAX_BRIGHTNESS);
@@ -313,10 +329,19 @@ STATE_DEF(wallS,
 //    } else {
 ////      setColor(fadeColor);
 //    }
+
     if (heading < FACE_COUNT) {
       setColorOnFace(dimToLevel(WALL_COLOR), heading);
       setColorOnFace(dimToLevel(WALL_COLOR), (heading + 1) % 6);
       setColorOnFace(dimToLevel(WALL_COLOR), (heading + 5) % 6);
+    }
+
+    moveStairs();
+    
+    FOREACH_FACE(f) {
+      if (bitRead(stairBits, f)/* && face is revealed*/) {
+        setColorOnFace(STAIRS_COLOR, f);
+      }
     }
     
     if (handleGameTimer()) return;
