@@ -6,11 +6,11 @@
 #define FOG_COLOR dim(WHITE, 32)
 #define RESET_COLOR MAGENTA
 #define STAIRS_COLOR YELLOW
-#define REVERT_TIME_PATH 10000
-#define REVERT_TIME_WALL  5000
+#define REVERT_TIME_PATH 4000
+#define REVERT_TIME_WALL  2000
 #define STAIR_INTERVAL    8000
-#define GAME_TIME_MAX 180000 //3 minutes
-//#define GAME_TIME_MAX 360000 //6 minutes
+//#define GAME_TIME_MAX 180000 //3 minutes
+#define GAME_TIME_MAX 360000 //6 minutes
 //#define GAME_TIME_MAX 10000 //10 seconds
 //              0     1      10   11    100   101       110             111      1000      1001      1010      1011      1100      1101      1110
 enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, UNUSED_2, LEVEL_MASK, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
@@ -64,11 +64,14 @@ bool handleGameTimer() {
   else { return false; }
 }
 
-void moveStairs() {
+void moveStairs(byte avoidFace) {
   if (stairsTimer.isExpired()) {
     stairBits = 0b00000000;
     if (random(6) == 0) {
-      bitSet(stairBits, random(6));
+      byte face = random(6);
+      if (face != avoidFace) {
+        bitSet(stairBits, face);
+      }
     }
     stairsTimer.set(STAIR_INTERVAL);
   }
@@ -183,6 +186,7 @@ STATE_DEF(avatarAscendedS,
   { //loop
     if (timer.isExpired()) {
       stairBits = 0b00000000;
+      level = level - 1;
       changeState(avatarS::state); return;
     }
   }
@@ -216,7 +220,7 @@ STATE_DEF(fogS,
     buttonSingleClicked(); //do nothing just consume errant click
     if (buttonLongPressed()) { changeState(avatarS::state); return; }
 
-    moveStairs();
+    moveStairs(heading);
 
     if (handleGameTimer()) return;
     handleBroadcasts(false, false);
@@ -336,8 +340,8 @@ STATE_DEF(wallS,
       setColorOnFace(dimToLevel(WALL_COLOR), (heading + 5) % 6);
     }
 
-    moveStairs();
-    
+    moveStairs(heading);
+
     FOREACH_FACE(f) {
       if (bitRead(stairBits, f)/* && face is revealed*/) {
         setColorOnFace(STAIRS_COLOR, f);
