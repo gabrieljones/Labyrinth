@@ -114,7 +114,10 @@ STATE_DEF(avatarLeavingS,
   { //loop
     if (!isValueReceivedOnFaceExpired(heading)) {
       // if neighbor is sending avatar then the avatar has succesfully moved
-      if ((getLastValueReceivedOnFace(heading) & AVATAR_0) == AVATAR_0) { changeState(pathS::state); return; }
+      if ((getLastValueReceivedOnFace(heading) & AVATAR_0) == AVATAR_0) {
+        setColor(dimToLevel(PATH_COLOR));
+        changeState(pathS::state); return;
+      }
       //TODO this might be tricky when the avatar moved to stairs...
     }
 
@@ -211,7 +214,7 @@ STATE_DEF(fogS,
 STATE_DEF(pathS, 
   { //entry
     setValueSentOnAllFaces(NONE);
-    setColor(FOG_COLOR);
+//    setColor(FOG_COLOR);
     timer.set(REVERT_TIME_PATH); //revert to fog after a longer bit
   },
   { //loop
@@ -259,9 +262,11 @@ STATE_DEF(pathS,
 
     if (isStairs) FOREACH_FACE(f) { setColorOnFace(dim(STAIRS_COLOR, f * (255 / 6)), f); }
     else {
-      setColorOnFace(dimToLevel(PATH_COLOR), heading);
-//      setColorOnFace(dimToLevel(PATH_COLOR), (heading + 1) % 6);
-//      setColorOnFace(dimToLevel(PATH_COLOR), (heading + 5) % 6);
+      if (heading < FACE_COUNT) {
+        setColorOnFace(dimToLevel(PATH_COLOR), heading);
+        setColorOnFace(dimToLevel(PATH_COLOR), (heading + 1) % 6);
+        setColorOnFace(dimToLevel(PATH_COLOR), (heading + 5) % 6);
+      }
     }
     
     if (handleGameTimer()) return;
@@ -308,9 +313,11 @@ STATE_DEF(wallS,
 //    } else {
 ////      setColor(fadeColor);
 //    }
-    setColorOnFace(dimToLevel(WALL_COLOR), heading);
-//    setColorOnFace(dimToLevel(WALL_COLOR), (heading + 1) % 6);
-//    setColorOnFace(dimToLevel(WALL_COLOR), (heading + 5) % 6);
+    if (heading < FACE_COUNT) {
+      setColorOnFace(dimToLevel(WALL_COLOR), heading);
+      setColorOnFace(dimToLevel(WALL_COLOR), (heading + 1) % 6);
+      setColorOnFace(dimToLevel(WALL_COLOR), (heading + 5) % 6);
+    }
     
     if (handleGameTimer()) return;
     handleBroadcasts(true, false);
