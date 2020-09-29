@@ -63,6 +63,7 @@ bool handleGameTimer() {
 }
 
 Color dimToLevel(Color color) {
+  return color;
   byte level_inv = AVATAR_6 - level;
   byte bright = map(level_inv, 0, AVATAR_5 & LEVEL_MASK, 32, MAX_BRIGHTNESS);
   return dim(color, bright);
