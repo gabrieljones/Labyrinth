@@ -209,7 +209,6 @@ STATE_DEF(fogS,
 
     if (heading < FACE_COUNT) { //next to avatar become path or wall or stairs
       byte chance = random(20);
-      isStairs = false;
       if (chance < 10) { changeState(pathS::state); return; }
       else { changeState(wallS::state); return; }
     } else { //not adjacent to avatar check if i am stairs
@@ -397,6 +396,7 @@ STATE_DEF(broadcastS,
     switch(broadcastMessage) {
       case ASCEND:
         setColor(FOG_COLOR);
+        isStairs = false;
         postBroadcastState = fogS::state;
         break;
       case WIN:
