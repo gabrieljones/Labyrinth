@@ -1,5 +1,3 @@
-#include "State.h"
-
 #define PATH_COLOR BLUE
 #define AVATAR_COLOR GREEN
 #define WALL_COLOR RED
@@ -12,6 +10,8 @@
 //#define GAME_TIME_MAX 180000 //3 minutes
 #define GAME_TIME_MAX 360000 //6 minutes
 //#define GAME_TIME_MAX 10000 //10 seconds
+enum state {INIT, AVATAR, AVATAR_ENTERING, AVATAR_LEAVING, AVATAR_ASCENDED, FOG, PATH, WALL, GAME_OVER, BROADCAST, BROADCAST_IGNORE};
+
 //              0     1      10   11    100   101       110             111      1000      1001      1010      1011      1100      1101      1110
 enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, UNUSED_2, LEVEL_MASK, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
 Timer timer;
@@ -22,25 +22,14 @@ bool won = false;
 byte heading = 255;
 protoc broadcastMessage = NONE;
 protoc level = AVATAR_6;
-State* postBroadcastState;
-
-STATE_DEC(initS);
-STATE_DEC(avatarS);
-STATE_DEC(avatarEnteringS);
-STATE_DEC(avatarLeavingS);
-STATE_DEC(avatarAscendedS);
-STATE_DEC(fogS);
-STATE_DEC(pathS);
-STATE_DEC(wallS);
-STATE_DEC(gameOverS);
-STATE_DEC(broadcastS);
-STATE_DEC(broadcastIgnoreS);
+state postBroadcastState;
+state state;
 
 // should always be last call of loop
 void handleBroadcasts(bool handleResetRequest, bool ignoreAscend) {  
   if (handleResetRequest && buttonLongPressed()) {
     broadcastMessage = RESET;
-    changeState(broadcastS::state); return;
+    enterBroadcastS(); return;
   }
   broadcastMessage = NONE;
   FOREACH_FACE(f) {
@@ -56,11 +45,11 @@ void handleBroadcasts(bool handleResetRequest, bool ignoreAscend) {
       }
     }
   }
-  if (broadcastMessage != NONE) { changeState(broadcastS::state); return; }
+  if (broadcastMessage != NONE) { enterBroadcastS(); return; }
 }
 
 bool handleGameTimer() {
-  if (millis() - startMillis > GAME_TIME_MAX) { changeState(gameOverS::state); return true; }
+  if (millis() - startMillis > GAME_TIME_MAX) { enterGameOverS(); return true; }
   else { return false; }
 }
 
@@ -78,18 +67,20 @@ Color dimToLevel(Color color) {
   return dim(color, bright);
 }
 
-STATE_DEF(avatarS, 
-  { //entry
+void enterAvatarS() {
     setValueSentOnAllFaces(level);
     setColor(OFF);
-  },
+    state = AVATAR;
+}
+
+void loopAvatar()
   { //loop
     FOREACH_FACE(f) {
       if (!isValueReceivedOnFaceExpired(f)) {
         switch(getLastValueReceivedOnFace(f)) {
           case MOVE: //avatar is being pulled to neighbor
             heading = f;
-            changeState(avatarLeavingS::state); return;
+            enterAvatarLeavingS(); return;
             break;
         }
       }
@@ -111,9 +102,8 @@ STATE_DEF(avatarS,
     if (handleGameTimer()) return;
     handleBroadcasts(true, true);
   }
-)
 
-STATE_DEF(avatarLeavingS, 
+void enterAvatarLeavingS() 
   { //entry
     setValueSentOnAllFaces(NONE);
     setValueSentOnFace(DEPARTED, heading);
@@ -121,13 +111,16 @@ STATE_DEF(avatarLeavingS,
     setColorOnFace(AVATAR_COLOR, heading);
     setColorOnFace(AVATAR_COLOR, (heading + 1) % 6);
     setColorOnFace(AVATAR_COLOR, (heading + 5) % 6);
-  },
+    state = AVATAR_LEAVING;
+  }
+
+void loopAvatarLeaving()
   { //loop
     if (!isValueReceivedOnFaceExpired(heading)) {
       // if neighbor is sending avatar then the avatar has succesfully moved
       if ((getLastValueReceivedOnFace(heading) & AVATAR_0) == AVATAR_0) {
         setColor(dimToLevel(PATH_COLOR));
-        changeState(pathS::state); return;
+        enterPathS(); return;
       }
       //TODO this might be tricky when the avatar moved to stairs...
     }
@@ -135,27 +128,29 @@ STATE_DEF(avatarLeavingS,
     if (handleGameTimer()) return;
     handleBroadcasts(true, false);
   }
-)
 
-STATE_DEF(avatarEnteringS, 
+void enterAvatarEnteringS()
   { //entry
     setValueSentOnFace(MOVE, heading); //request the avatar move here
     setColor(dimToLevel(PATH_COLOR));
     setColorOnFace(AVATAR_COLOR, heading);
     setColorOnFace(AVATAR_COLOR, (heading + 1) % 6);
     setColorOnFace(AVATAR_COLOR, (heading + 5) % 6);
-  },
+    state = AVATAR_ENTERING;
+  }
+
+void loopAvatarEntering()
   { //loop
     if (!isValueReceivedOnFaceExpired(heading)) {
       switch (getLastValueReceivedOnFace(heading)) {
         case DEPARTED: //former avatar blink is acknowledging move request
           if (isStairs) {
-            changeState(avatarAscendedS::state); return;
+            enterAvatarAscendedS(); return;
           } else {
-            changeState(avatarS::state); return;
+            enterAvatarS(); return;
           }
         case NONE: //former avatar tile became path, avatar must have moved to some other blink
-          changeState(pathS::state); return; //revert back to path
+          enterPathS(); return; //revert back to path
         default:
           break;
       }
@@ -164,9 +159,8 @@ STATE_DEF(avatarEnteringS,
     if (handleGameTimer()) return;
     handleBroadcasts(true, true);
   }
-)
 
-STATE_DEF(avatarAscendedS, 
+void enterAvatarAscendedS()
   { //entry
     timer.set(750);
     if (level <= AVATAR_0) {//we won
@@ -178,21 +172,25 @@ STATE_DEF(avatarAscendedS,
     setColor(OFF);
     setColorOnFace(AVATAR_COLOR, 0);
     setValueSentOnAllFaces(broadcastMessage);
-  },
+    state = AVATAR_ASCENDED;
+  }
+
+void loopAvatarAscended()
   { //loop
     if (timer.isExpired()) {
       isStairs = false;
       level = level - 1;
-      changeState(avatarS::state); return;
+      enterAvatarS(); return;
     }
   }
-)
 
-STATE_DEF(fogS, 
+void enterFogS() 
   { //entry
     setValueSentOnAllFaces(NONE);
     setColor(FOG_COLOR);
-  },
+    state = FOG;
+  }
+void loopFog()
   { //loop
 
     heading = 255;
@@ -209,27 +207,28 @@ STATE_DEF(fogS,
 
     if (heading < FACE_COUNT) { //next to avatar become path or wall or stairs
       byte chance = random(20);
-      if (chance < 10) { changeState(pathS::state); return; }
-      else { changeState(wallS::state); return; }
+      if (chance < 10) { enterPathS(); return; }
+      else { enterWallS(); return; }
     } else { //not adjacent to avatar check if i am stairs
       moveStairs();
     }
 
     buttonSingleClicked(); //do nothing just consume errant click
-    if (buttonLongPressed()) { changeState(avatarS::state); return; }
+    if (buttonLongPressed()) { enterAvatarS(); return; }
 
     if (handleGameTimer()) return;
     handleBroadcasts(false, false);
   }
-)
 
-STATE_DEF(pathS, 
+void enterPathS()
   { //entry
     setValueSentOnAllFaces(NONE);
     timer.set(REVERT_TIME_PATH); //revert to fog after a bit
-  },
+    state = PATH;
+  }
+void loopPath()
   { //loop
-    if(isAlone()) { changeState(fogS::state); return; }
+    if(isAlone()) { enterFogS(); return; }
 
     heading = 255;
     FOREACH_FACE(f) { //check if avatar is on neighbor
@@ -244,12 +243,12 @@ STATE_DEF(pathS,
     }
     
     if(timer.isExpired()) {
-      if (heading > FACE_COUNT) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
+      if (heading > FACE_COUNT) { enterFogS(); return; } //if avatar is not on any neighbor revert to fog
     }
       
     if (buttonSingleClicked()) {
       if (heading < FACE_COUNT) {
-        changeState(avatarEnteringS::state); return;
+        enterAvatarEnteringS(); return;
       }
     }
 
@@ -291,15 +290,16 @@ STATE_DEF(pathS,
     if (handleGameTimer()) return;
     handleBroadcasts(true, false);
   }
-)
 
-STATE_DEF(wallS, 
+void enterWallS()
   { //entry
     setValueSentOnAllFaces(NONE);
     timer.set(REVERT_TIME_WALL); //revert to fog after a bit
-  },
+    state = WALL;
+  }
+void loopWall()
   { //loop
-    if(isAlone()) { changeState(fogS::state); return; }
+    if(isAlone()) { enterFogS(); return; }
 
     heading = 255;
     FOREACH_FACE(f) { //check if avatar is on neighbor
@@ -314,12 +314,12 @@ STATE_DEF(wallS,
     }
     
     if(timer.isExpired()) {
-      if (heading > FACE_COUNT) { changeState(fogS::state); return; } //if avatar is not on any neighbor revert to fog
+      if (heading > FACE_COUNT) { enterFogS(); return; } //if avatar is not on any neighbor revert to fog
     }
 
     if (buttonSingleClicked()) {
       if (heading < FACE_COUNT && isStairs) {//if avatar adjacent and i am stairs
-        changeState(avatarEnteringS::state); return;
+        enterAvatarEnteringS(); return;
       }
     }
 
@@ -358,9 +358,8 @@ STATE_DEF(wallS,
     if (handleGameTimer()) return;
     handleBroadcasts(true, false);
   }
-)
 
-STATE_DEF(gameOverS, 
+void enterGameOverS()
   { //entry
     setValueSentOnAllFaces(NONE);
     if(won) { //TODO better win celebration animation
@@ -373,7 +372,9 @@ STATE_DEF(gameOverS,
         if (f % 2 == 0) setColorOnFace(OFF, f);
       }
     }
-  },
+    state = GAME_OVER;
+  }
+void loopGameOver()
   { //loop
 
     //animate 
@@ -387,9 +388,8 @@ STATE_DEF(gameOverS,
 
     handleBroadcasts(true, true);
   }
-)
 
-STATE_DEF(broadcastS, 
+void enterBroadcastS()
   { //entry
     timer.set(500);
     setValueSentOnAllFaces(broadcastMessage);
@@ -397,38 +397,76 @@ STATE_DEF(broadcastS,
       case ASCEND:
         setColor(FOG_COLOR);
         isStairs = false;
-        postBroadcastState = fogS::state;
+        postBroadcastState = FOG;
         break;
       case WIN:
         won = true;
         setColor(STAIRS_COLOR);
-        postBroadcastState = gameOverS::state;
+        postBroadcastState = GAME_OVER;
         break;
       case RESET:
         setColor(RED);
-        postBroadcastState = initS::state;
+        postBroadcastState = INIT;
         break;
     }
-  },
-  { //loop
-    if(timer.isExpired()) { changeState(broadcastIgnoreS::state); return; }
+    state = BROADCAST;
   }
-)
+void loopBroadcast()
+  { //loop
+    if(timer.isExpired()) { enterBroadcastIgnoreS(); return; }
+  }
 
-STATE_DEF(broadcastIgnoreS,
+void enterBroadcastIgnoreS()
   { //entry
     timer.set(500);
     setValueSentOnAllFaces(NONE); //stop broadcasting
     setColor(dimToLevel(BLUE));
-  },
+    state = BROADCAST_IGNORE;
+  }
+void loopBroadcastIgnore()
   { //loop
     if(timer.isExpired()) { //stop ignoring
-      changeState(postBroadcastState); return;
+      state = postBroadcastState;
+      
+      switch(postBroadcastState) {
+        case INIT:
+          enterInitS();
+          break;
+        case AVATAR:
+          enterAvatarS();
+          break;
+        case AVATAR_ENTERING:
+          enterAvatarEnteringS();
+          break;
+        case AVATAR_LEAVING:
+          enterAvatarLeavingS();
+          break;
+        case AVATAR_ASCENDED:
+          enterAvatarAscendedS();
+          break;
+        case FOG:
+          enterFogS();
+          break;
+        case PATH:
+          enterPathS();
+          break;
+        case WALL:
+          enterWallS();
+          break;
+        case GAME_OVER:
+          enterGameOverS();
+          break;
+        case BROADCAST:
+          enterBroadcastS();
+          break;
+        case BROADCAST_IGNORE:
+          enterBroadcastIgnoreS();
+          break;
+        }
     }
   }
-)
 
-STATE_DEF(initS,
+void enterInitS()
   { //entry
     setValueSentOnAllFaces(NONE);
     startMillis = millis();
@@ -437,16 +475,53 @@ STATE_DEF(initS,
     level = AVATAR_6;
     broadcastMessage = NONE;
     setColor(dimToLevel(GREEN));
-  },
-  { //loop
-    changeState(fogS::state); return;
+    state = FOG; //shortcircuit straight to FOG
   }
-)
+/*
+void loopInit()
+  { //loop
+    enterfogS(); return;
+  }
+*/
 
 void setup() {
-  changeState(initS::state); return;
+  enterInitS();
 }
 
 void loop() {
-  stateFn();
+  switch(state) {
+    case INIT:
+      //should never be in this state
+      break;
+    case AVATAR:
+      loopAvatar();
+      break;
+    case AVATAR_ENTERING:
+      loopAvatarEntering();
+      break;
+    case AVATAR_LEAVING:
+      loopAvatarLeaving();
+      break;
+    case AVATAR_ASCENDED:
+      loopAvatarAscended();
+      break;
+    case FOG:
+      loopFog();
+      break;
+    case PATH:
+      loopPath();
+      break;
+    case WALL:
+      loopWall();
+      break;
+    case GAME_OVER:
+      loopGameOver();
+      break;
+    case BROADCAST:
+      loopBroadcast();
+      break;
+    case BROADCAST_IGNORE:
+      loopBroadcastIgnore();
+      break;
+  }
 }
