@@ -13,7 +13,7 @@
 enum state {INIT, AVATAR, AVATAR_ENTERING, AVATAR_LEAVING, AVATAR_ASCENDED, FOG, PATH, WALL, GAME_OVER, BROADCAST, BROADCAST_IGNORE};
 
 //              0     1      10   11    100   101       110             111      1000      1001      1010      1011      1100      1101      1110
-enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, UNUSED_2, LEVEL_MASK, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
+enum protoc {NONE, MOVE, ASCEND, WIN, RESET, DEPARTED, PATH_FIND, LEVEL_MASK, AVATAR_0, AVATAR_1, AVATAR_2, AVATAR_3, AVATAR_4, AVATAR_5, AVATAR_6};
 Timer timer;
 Timer stairsTimer;
 unsigned long startMillis;
@@ -26,7 +26,7 @@ state postBroadcastState;
 state state;
 
 // should always be last call of loopState_ function
-void handleBroadcasts(bool handleResetRequest, bool ignoreAscend) {  
+void handleBroadcasts(bool handleResetRequest, bool ignoreAscend, bool ignorePathFind) {  
   if (handleResetRequest && buttonLongPressed()) {
     broadcastMessage = RESET;
     enterState_Broadcast(); return;
@@ -36,6 +36,8 @@ void handleBroadcasts(bool handleResetRequest, bool ignoreAscend) {
     if (!isValueReceivedOnFaceExpired(f)) {
       protoc lastValue = getLastValueReceivedOnFace(f);
       switch(lastValue) {
+        case PATH_FIND:
+          if (ignorePathFind) break;
         case ASCEND:
           if (ignoreAscend) break;
         case WIN:
@@ -99,7 +101,7 @@ void loopState_Avatar() {
   }
 
   if (handleGameTimer()) return;
-  handleBroadcasts(true, true);
+  handleBroadcasts(true, true, true);
 }
 
 void enterState_AvatarLeaving() {
@@ -123,7 +125,7 @@ void loopState_AvatarLeaving() {
   }
 
   if (handleGameTimer()) return;
-  handleBroadcasts(true, false);
+  handleBroadcasts(true, false, true);
 }
 
 void enterState_AvatarEntering() {
@@ -152,7 +154,7 @@ void loopState_AvatarEntering() {
   }
 
   if (handleGameTimer()) return;
-  handleBroadcasts(true, true);
+  handleBroadcasts(true, true, true);
 }
 
 void enterState_AvatarAscended() {
@@ -208,7 +210,7 @@ void loopState_Fog() {
   if (buttonLongPressed()) { enterState_Avatar(); return; }
 
   if (handleGameTimer()) return;
-  handleBroadcasts(false, false);
+  handleBroadcasts(false, false, true);
 }
 
 void enterState_Path() {
@@ -220,6 +222,7 @@ void enterState_Path() {
 void loopState_Path() {
   if(isAlone()) { enterState_Fog(); return; }
 
+  bool pathFind = false;
   heading = 255;
   FOREACH_FACE(f) { //check if avatar is on neighbor
     if (!isValueReceivedOnFaceExpired(f)) {
@@ -229,7 +232,13 @@ void loopState_Path() {
         level = lastValue;
         break;
       }
+      if (lastValue == PATH_FIND) { pathFind = true; }
     }
+  }
+
+  if (pathFind && heading < FACE_COUNT) {
+    // if I see a path find wave and I am next to the avatar, request the avatar to move to me
+    enterState_AvatarEntering(); return;
   }
   
   if(timer.isExpired()) {
@@ -239,6 +248,10 @@ void loopState_Path() {
   if (buttonSingleClicked()) {
     if (heading < FACE_COUNT) {
       enterState_AvatarEntering(); return;
+    } else {
+      //Avatar not neighbor broadcast PATH_FIND
+      broadcastMessage = PATH_FIND;
+      enterState_Broadcast(); return;
     }
   }
 
@@ -278,7 +291,7 @@ void loopState_Path() {
   }
   
   if (handleGameTimer()) return;
-  handleBroadcasts(true, false);
+  handleBroadcasts(true, false, false);
 }
 
 void enterState_Wall() {
@@ -345,7 +358,7 @@ void loopState_Wall() {
   }
   
   if (handleGameTimer()) return;
-  handleBroadcasts(true, false);
+  handleBroadcasts(true, false, true);
 }
 
 void enterState_GameOver() {
@@ -374,13 +387,16 @@ void loopState_GameOver() {
     }
   }
 
-  handleBroadcasts(true, true);
+  handleBroadcasts(true, true, true);
 }
 
 void enterState_Broadcast() {
   timer.set(500);
   setValueSentOnAllFaces(broadcastMessage);
   switch(broadcastMessage) {
+    case PATH_FIND:
+      setColor(PATH_COLOR);
+      postBroadcastState = state; //revert to current state after broadcast, technically only paths will broadcast this so this should always be PATH
     case ASCEND:
       setColor(FOG_COLOR);
       isStairs = false;
@@ -433,9 +449,9 @@ void loopState_BroadcastIgnore() {
         case FOG:
           enterState_Fog();
           break;
-//        case PATH:
-//          enterState_Path();
-//          break;
+        case PATH:
+          enterState_Path();
+          break;
 //        case WALL:
 //          enterState_Wall();
 //          break;
