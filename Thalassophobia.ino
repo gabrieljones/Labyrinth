@@ -358,6 +358,7 @@ void enterState_Broadcast() {
     case ASCEND:
       fogDisplay();
       isStairs = false;
+      stairsTimer.set(STAIR_INTERVAL); //prevent stairs from popping next to avatar immediately on ascension
       postBroadcastState = FOG;
       break;
     case WIN:
