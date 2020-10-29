@@ -101,7 +101,7 @@ bool handleGameTimer() {
 
 void moveStairs() {
   if (stairsTimer.isExpired()) {
-    isStairs = random(20) == 0;
+    isStairs = random(30) == 0;
     stairsTimer.set(STAIR_INTERVAL);
   }
 }
