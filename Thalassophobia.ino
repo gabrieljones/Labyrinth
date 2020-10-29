@@ -222,7 +222,7 @@ void loopState_Fog() {
 
   if (isAvatarAdjacent()) {
     byte chance = random(20);
-    if (chance < 10) {
+    if (chance < 11) {
       enterState_Path();
       return;
     } else {
