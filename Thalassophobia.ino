@@ -86,12 +86,15 @@ void pointHeadingToAdjacentAvatar() {
   }
 }
 
+bool isAvatarAdjacent() {
+  return heading < FACE_COUNT;
+}
+
 bool handleGameTimer() {
   if (millis() - startMillis > GAME_TIME_MAX) {
     enterState_GameOver();
     return true;
-  }
-  else {
+  } else {
     return false;
   }
 }
@@ -209,6 +212,7 @@ void loopState_AvatarAscended() {
 
 void enterState_Fog() {
 
+  setValueSentOnAllFaces(NONE);
   fogDisplay();
 
   state = FOG;
@@ -217,17 +221,16 @@ void enterState_Fog() {
 void loopState_Fog() {
   pointHeadingToAdjacentAvatar();
 
-  if (heading < FACE_COUNT) { //next to avatar become path or wall or stairs
+  if (isAvatarAdjacent()) {
     byte chance = random(20);
     if (chance < 10) {
       enterState_Path();
       return;
-    }
-    else {
+    } else {
       enterState_Wall();
       return;
     }
-  } else { //not adjacent to avatar check if i am stairs
+  } else {
     moveStairs();
   }
 
@@ -248,7 +251,7 @@ void enterState_Path() {
 }
 
 void loopState_Path() {
-  if (isAlone()) {
+  if(isAlone()) {
     enterState_Fog();
     return;
   }
@@ -256,21 +259,21 @@ void loopState_Path() {
   pointHeadingToAdjacentAvatar();
 
   if (timer.isExpired()) {
-    if (heading > FACE_COUNT) {
-      enterState_Fog();  //if avatar is not on any neighbor revert to fog
+    if (!isAvatarAdjacent()) {
+      enterState_Fog();
       return;
     }
   }
 
   if (buttonSingleClicked()) {
-    if (heading < FACE_COUNT) {
+    if (isAvatarAdjacent()) {
       enterState_AvatarEntering(); return;
     }
   }
 
-  if (heading < FACE_COUNT) { //next to avatar reset revert timer
+  if (isAvatarAdjacent()) {
     timer.set(REVERT_TIME_PATH);
-  } else { //not adjacent to avatar check if i am stairs
+  } else {
     moveStairs();
   }
 
@@ -295,21 +298,22 @@ void loopState_Wall() {
   pointHeadingToAdjacentAvatar();
 
   if (timer.isExpired()) {
-    if (heading > FACE_COUNT) {
-      enterState_Fog();  //if avatar is not on any neighbor revert to fog
+    if (!isAvatarAdjacent()) {
+      enterState_Fog();
       return;
     }
   }
 
   if (buttonSingleClicked()) {
-    if (heading < FACE_COUNT && isStairs) {//if avatar adjacent and i am stairs
-      enterState_AvatarEntering(); return;
+    if (isAvatarAdjacent() && isStairs) {
+      enterState_AvatarEntering();
+      return;
     }
   }
 
-  if (heading < FACE_COUNT) { //adjacent to avatar reset revert timer
+  if (isAvatarAdjacent()) {
     timer.set(REVERT_TIME_WALL);
-  } else { //not adjacent to avatar check if i am stairs
+  } else {
     moveStairs();
   }
 
@@ -385,13 +389,13 @@ void enterState_BroadcastIgnore() {
 }
 
 void loopState_BroadcastIgnore() {
-    if(timer.isExpired()) { //stop ignoring
-      state = postBroadcastState;
-      
-      switch(postBroadcastState) {
-        case INIT:
-          enterState_Init();
-          break;
+  if(timer.isExpired()) { //stop ignoring
+    state = postBroadcastState;
+
+    switch (postBroadcastState) {
+      case INIT:
+        enterState_Init();
+        break;
 //        case AVATAR:
 //          enterState_Avatar();
 //          break;
@@ -404,25 +408,25 @@ void loopState_BroadcastIgnore() {
 //        case AVATAR_ASCENDED:
 //          enterState_AvatarAscended();
 //          break;
-        case FOG:
-          enterState_Fog();
-          break;
+      case FOG:
+        enterState_Fog();
+        break;
 //        case PATH:
 //          enterState_Path();
 //          break;
 //        case WALL:
 //          enterState_Wall();
 //          break;
-        case GAME_OVER:
-          enterState_GameOver();
-          break;
+      case GAME_OVER:
+        enterState_GameOver();
+        break;
 //        case BROADCAST:
 //          enterState_Broadcast();
 //          break;
 //        case BROADCAST_IGNORE:
 //          enterState_BroadcastIgnore();
 //          break;
-    }
+     }
   }
 }
 
