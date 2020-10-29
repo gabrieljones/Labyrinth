@@ -149,12 +149,11 @@ void enterState_AvatarLeaving() {
 
 void loopState_AvatarLeaving() {
   if (!isValueReceivedOnFaceExpired(heading)) {
-    // if neighbor is sending avatar then the avatar has succesfully moved
+    // if neighbor is sending avatar then the avatar has successfully moved
     if ((getLastValueReceivedOnFace(heading) & AVATAR_0) == AVATAR_0) {
       setColor(dimToLevel(PATH_COLOR));
       enterState_Path(); return;
     }
-    //TODO this might be tricky when the avatar moved to stairs...
   }
 
   if (handleGameTimer()) return;
