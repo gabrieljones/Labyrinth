@@ -212,7 +212,6 @@ void loopState_AvatarAscended() {
 void enterState_Fog() {
 
   setValueSentOnAllFaces(NONE);
-  fogDisplay();
 
   state = FOG;
 }
@@ -356,18 +355,15 @@ void enterState_Broadcast() {
   setValueSentOnAllFaces(broadcastMessage);
   switch (broadcastMessage) {
     case ASCEND:
-      fogDisplay();
       isStairs = false;
       stairsTimer.set(STAIR_INTERVAL); //prevent stairs from popping next to avatar immediately on ascension
       postBroadcastState = FOG;
       break;
     case WIN:
       won = true;
-      setColor(WHITE);
       postBroadcastState = GAME_OVER;
       break;
     case RESET:
-      fogDisplay();
       postBroadcastState = INIT;
       break;
   }
@@ -375,6 +371,17 @@ void enterState_Broadcast() {
 }
 
 void loopState_Broadcast() {
+  switch (broadcastMessage) {
+    case ASCEND:
+      stairsDisplay();
+      break;
+    case WIN:
+      winBroadcastDisplay();
+      break;
+    case RESET:
+      resetDisplay();
+      break;
+  }
   if (timer.isExpired()) {
     enterState_BroadcastIgnore();
     return;
@@ -384,11 +391,21 @@ void loopState_Broadcast() {
 void enterState_BroadcastIgnore() {
   timer.set(500);
   setValueSentOnAllFaces(NONE); //stop broadcasting
-  fogDisplay();
   state = BROADCAST_IGNORE;
 }
 
 void loopState_BroadcastIgnore() {
+  switch (broadcastMessage) {
+    case ASCEND:
+      stairsDisplay();
+      break;
+    case WIN:
+      winBroadcastDisplay();
+      break;
+    case RESET:
+      resetDisplay();
+      break;
+  }
   if(timer.isExpired()) { //stop ignoring
     state = postBroadcastState;
 
@@ -438,7 +455,6 @@ void enterState_Init() {
   level = AVATAR_6;
   broadcastMessage = NONE;
   //setColor(dimToLevel(GREEN));
-  fogDisplay();
   enterState_Fog(); return; //shortcircuit straight to FOG
 }
 
